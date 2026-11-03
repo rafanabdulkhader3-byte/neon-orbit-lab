@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neon Orbit Lab</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: #050816; }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; }
+    .hud { position: fixed; inset: 0; pointer-events: none; padding: 28px; display: flex; flex-direction: column; justify-content: space-between; }
+    .panel { pointer-events: auto; width: min(390px, calc(100vw - 56px)); padding: 20px; border: 1px solid rgba(151, 164, 255, .25); border-radius: 20px; background: rgba(8, 12, 36, .62); backdrop-filter: blur(18px); box-shadow: 0 18px 70px rgba(0,0,0,.3); }
+    h1 { margin: 0 0 7px; font-size: clamp(24px, 4vw, 40px); letter-spacing: -.05em; }
+    p { margin: 0; color: #a9b2d8; line-height: 1.5; font-size: 14px; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+    button { border: 1px solid rgba(166, 178, 255, .35); background: rgba(111, 95, 255, .16); color: #e9ebff; padding: 9px 12px; border-radius: 999px; cursor: pointer; transition: .2s ease; }
+    button:hover { transform: translateY(-2px); background: rgba(124, 109, 255, .35); }
+    .hint { align-self: flex-end; color: #8790b7; font-size: 12px; text-align: right; }
+    .status { margin-top: 14px; color: #8df7df; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div class="hud">
+    <section class="panel">
+      <h1>Neon Orbit Lab</h1>
+      <p>Drag to orbit around the scene, scroll to zoom, and click a planet to change its energy.</p>
+      <div class="controls">
+        <button id="randomize">Randomize orbit</button>
+        <button id="reset">Reset camera</button>
+        <button id="toggle">Pause animation</button>
+      </div>
+      <div class="status" id="status">System stable</div>
+    </section>
+    <div class="hint">Three.js · realtime lighting · interactive scene</div>
+  </div>
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
+    import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/controls/OrbitControls.js';
+
+    const app = document.querySelector('#app');
+    const status = document.querySelector('#status');
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x050816, 0.035);
+
+    const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
+    camera.position.set(0, 4.7, 11);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.25;
+    app.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.minDistance = 5;
+    controls.maxDistance = 22;
+    controls.target.set(0, 0.8, 0);
+
+    scene.add(new THREE.AmbientLight(0x6677bb, 1.7));
+    const key = new THREE.PointLight(0x7d8cff, 90, 30, 2);
+    key.position.set(4, 6, 5); scene.add(key);
+    const rim = new THREE.PointLight(0xff3dba, 70, 25, 2);
+    rim.position.set(-5, 2, -3); scene.add(rim);
+
+    const starGeometry = new THREE.BufferGeometry();
+    const starPositions = [];
+    for (let i = 0; i < 900; i++) {
+      const radius = 18 + Math.random() * 38;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      starPositions.push(radius * Math.sin(phi) * Math.cos(theta), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta));
+    }
+    starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
+    scene.add(new THREE.Points(starGeometry, new THREE.PointsMaterial({ color: 0xaab7ff, size: .045, transparent: true, opacity: .8 })));
+
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(18, 64), new THREE.MeshBasicMaterial({ color: 0x080c27, transparent: true, opacity: .6 }));
+    floor.rotation.x = -Math.PI / 2; floor.position.y = -2.05; scene.add(floor);
+    const grid = new THREE.GridHelper(36, 36, 0x24307d, 0x11163f);
+    grid.position.y = -2.02; grid.material.transparent = true; grid.material.opacity = .35; scene.add(grid);
+
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1.45, 4), new THREE.MeshStandardMaterial({ color: 0x5865ff, emissive: 0x1b2bff, emissiveIntensity: 1.8, roughness: .2, metalness: .35 }));
+    scene.add(core);
+    const coreGlow = new THREE.Mesh(new THREE.SphereGeometry(1.8, 32, 32), new THREE.MeshBasicMaterial({ color: 0x4354ff, transparent: true, opacity: .09, blending: THREE.AdditiveBlending }));
+    scene.add(coreGlow);
+
+    const planets = [];
+    const colors = [0xff4db8, 0x33e6ff, 0xffc857, 0x9b7bff];
+    for (let i = 0; i < 4; i++) {
+      const orbit = new THREE.Group();
+      orbit.rotation.x = (i - 1.5) * .22;
+      orbit.rotation.z = (i % 2 ? 1 : -1) * .28;
+      scene.add(orbit);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(2.5 + i * .72, .008, 8, 128), new THREE.MeshBasicMaterial({ color: colors[i], transparent: true, opacity: .3 }));
+      ring.rotation.x = Math.PI / 2; scene.add(ring);
+      const planet = new THREE.Mesh(new THREE.SphereGeometry(.24 + i * .055, 24, 24), new THREE.MeshStandardMaterial({ color: colors[i], emissive: colors[i], emissiveIntensity: .65, roughness: .18, metalness: .25 }));
+      planet.position.x = 2.5 + i * .72;
+      planet.userData = { orbit, baseX: planet.position.x, speed: .35 + i * .1, phase: i * 1.7, selected: false };
+      orbit.add(planet); planets.push(planet);
+    }
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let paused = false;
+    let time = 0;
+    renderer.domElement.addEventListener('pointerdown', (event) => {
+      pointer.x = (event.clientX / innerWidth) * 2 - 1;
+      pointer.y = -(event.clientY / innerHeight) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObjects(planets)[0];
+      if (!hit) return;
+      planets.forEach(p => p.userData.selected = false);
+      hit.object.userData.selected = true;
+      status.textContent = `Planet ${planets.indexOf(hit.object) + 1} amplified`;
+    });
+    document.querySelector('#randomize').onclick = () => planets.forEach((p, i) => { p.userData.phase = Math.random() * 6.28; p.userData.speed = .2 + Math.random() * .55; status.textContent = 'Orbits randomized'; });
+    document.querySelector('#reset').onclick = () => { camera.position.set(0, 4.7, 11); controls.target.set(0, .8, 0); controls.update(); status.textContent = 'Camera reset'; };
+    document.querySelector('#toggle').onclick = (event) => { paused = !paused; event.currentTarget.textContent = paused ? 'Resume animation' : 'Pause animation'; status.textContent = paused ? 'System paused' : 'System stable'; };
+    addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = clock.getDelta();
+      if (!paused) time += dt;
+      core.rotation.x += dt * .12; core.rotation.y += dt * .22;
+      coreGlow.scale.setScalar(1 + Math.sin(time * 2) * .04);
+      planets.forEach((planet, i) => {
+        planet.userData.orbit.rotation.y = time * planet.userData.speed + planet.userData.phase;
+        planet.rotation.y += dt * (1 + i * .3);
+        const target = planet.userData.selected ? 1.55 : 1;
+        planet.scale.lerp(new THREE.Vector3(target, target, target), .12);
+      });
+      controls.update(); renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
